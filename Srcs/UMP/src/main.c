@@ -26,6 +26,7 @@ typedef struct {
     int8_t  x_byte;
     int8_t  y_byte;
     int8_t  wheel_byte;
+    int8_t  hwheel_byte;  // 横ホイール
 } mouse_map_t;
 
 // dev_addr は 1-based で最大 CFG_TUH_DEVICE_MAX
@@ -40,16 +41,15 @@ static void parse_mouse_descriptor(uint8_t const *desc, uint16_t len, mouse_map_
     map->x_byte     = -1;
     map->y_byte     = -1;
     map->wheel_byte = -1;
+    map->hwheel_byte = -1;
 
     uint16_t usage_page = 0;
-    uint16_t usage      = 0;
     int32_t  bit_offset = 0;  // report ID除く先頭からのビット位置
     uint8_t  report_size  = 0;
     uint8_t  report_count = 0;
-    bool     in_pointer   = false;
 
-    // pending usages for multi-usage items
-    uint8_t pending_usages[8];
+    // pending usages for multi-usage items (1/2-byte usage values)
+    uint16_t pending_usages[8];
     uint8_t pending_count = 0;
 
     uint16_t i = 0;
@@ -65,17 +65,12 @@ static void parse_mouse_descriptor(uint8_t const *desc, uint16_t len, mouse_map_
 
         switch (tag) {
             case 0x04: usage_page   = (uint16_t)val; break;  // Usage Page
-            case 0x08: usage        = (uint16_t)val;          // Usage
-                if (pending_count < 8) pending_usages[pending_count++] = (uint8_t)val;
-                break;
+            case 0x08: if (pending_count < 8) pending_usages[pending_count++] = (uint16_t)val; break; // Usage
             case 0x74: report_size  = (uint8_t)val;  break;  // Report Size
             case 0x94: report_count = (uint8_t)val;  break;  // Report Count
             case 0x84: map->report_id = (uint8_t)val; break; // Report ID
-            case 0xA0:                                         // Collection
-                if (usage == 0x01) in_pointer = true;
-                pending_count = 0;
-                break;
-            case 0xC0: in_pointer = false; pending_count = 0; break; // End Collection
+            case 0xA0: pending_count = 0; break;              // Collection
+            case 0xC0: pending_count = 0; break;              // End Collection
             case 0x80: {  // Input
                 bool is_const = (val & 0x01) != 0;
                 if (is_const) {
@@ -83,16 +78,22 @@ static void parse_mouse_descriptor(uint8_t const *desc, uint16_t len, mouse_map_
                 } else if (usage_page == 0x09) {
                     // Button page
                     if (map->btn_byte < 0) map->btn_byte = (int8_t)(bit_offset / 8);
-                } else if (usage_page == 0x01) {
-                    // Generic Desktop
+                } else if (usage_page == 0x01 || usage_page == 0x0C) {
+                    // Generic Desktop / Consumer (AC Pan)
                     uint8_t apply = (pending_count > 0 && pending_count <= report_count)
                                     ? pending_count : report_count;
                     for (uint8_t u = 0; u < apply && u < pending_count; u++) {
                         int8_t byte_pos = (int8_t)((bit_offset + u * report_size) / 8);
-                        switch (pending_usages[u]) {
-                            case 0x30: map->x_byte     = byte_pos; break;  // X
-                            case 0x31: map->y_byte     = byte_pos; break;  // Y
-                            case 0x38: map->wheel_byte = byte_pos; break;  // Wheel
+                        if (usage_page == 0x01) {
+                            switch (pending_usages[u]) {
+                                case 0x30: map->x_byte     = byte_pos; break;  // X
+                                case 0x31: map->y_byte     = byte_pos; break;  // Y
+                                case 0x38: map->wheel_byte = byte_pos; break;  // Wheel
+                            }
+                        } else if (usage_page == 0x0C) {
+                            if (pending_usages[u] == 0x0238) {
+                                map->hwheel_byte = byte_pos;  // AC Pan
+                            }
                         }
                     }
                 }
@@ -122,12 +123,13 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
     }
 
     hid_report_t r;
-    r.len = 4;
+    r.len = 5;
     // デスクリプタ解析結果に基づいてバイトを取り出す
     r.data[0] = (map->btn_byte   >= 0 && map->btn_byte   < (int8_t)len) ? report[map->btn_byte]   : 0;
     r.data[1] = (map->x_byte     >= 0 && map->x_byte     < (int8_t)len) ? report[map->x_byte]     : 0;
     r.data[2] = (map->y_byte     >= 0 && map->y_byte     < (int8_t)len) ? report[map->y_byte]     : 0;
     r.data[3] = (map->wheel_byte >= 0 && map->wheel_byte < (int8_t)len) ? report[map->wheel_byte] : 0;
+    r.data[4] = (map->hwheel_byte >= 0 && map->hwheel_byte < (int8_t)len) ? report[map->hwheel_byte] : 0;
     queue_try_add(&s_report_queue, &r);
 
     tuh_hid_receive_report(dev_addr, instance);
@@ -140,12 +142,18 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance,
     mouse_map_t *map = &s_device_map[dev_addr < DEVICE_MAP_MAX ? dev_addr : 0];
     parse_mouse_descriptor(desc_report, desc_len, map);
 
+    // Debug: hwheel_byte が見つかったかLEDで表示
+    if (map->hwheel_byte >= 0) {
+        gpio_put(LED_PIN, false);  // Found horizontal wheel (LED ON)
+    } else {
+        gpio_put(LED_PIN, true);   // Not found (LED OFF)
+    }
+
     uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
     if (itf_protocol == HID_ITF_PROTOCOL_MOUSE) {
         // Boot Interface 対応マウス: Report Protocol に切り替えてホイールを有効化
         // 完了後に tuh_hid_set_protocol_complete_cb -> tuh_hid_receive_report の順で呼ばれる
         tuh_hid_set_protocol(dev_addr, instance, HID_PROTOCOL_REPORT);
-        gpio_put(LED_PIN, false);
     } else {
         // Boot Interface なし: そのまま受信開始
         tuh_hid_receive_report(dev_addr, instance);
@@ -201,7 +209,7 @@ int main(void)
 
         hid_report_t r;
         if (tud_hid_ready() && queue_try_remove(&s_report_queue, &r)) {
-            tud_hid_report(1, r.data, r.len);
+            tud_hid_report(1, r.data, 5);  // 常に 5 バイト送信
         }
 
         // uint32_t now = to_ms_since_boot(get_absolute_time());
