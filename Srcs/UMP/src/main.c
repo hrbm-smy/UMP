@@ -8,6 +8,10 @@
 #define LED_PIN           25
 #define BLINK_INTERVAL_MS 1000
 #define USB_DP_PIN        0   // D+ = GPIO 0, D- = GPIO 1 (自動)
+#define BTN_MASK_OUT      0x07
+#define BTN_X1_MASK       0x08
+#define BTN_NON_X1_MASK   ((uint8_t)~BTN_X1_MASK)
+#define TRACK_SCROLL_THRESHOLD 16
 
 #define REPORT_QUEUE_SIZE 16
 #define REPORT_MAX_LEN    16
@@ -18,6 +22,34 @@ typedef struct {
 } hid_report_t;
 
 static queue_t s_report_queue;
+static bool s_track_scroll_mode = false;
+static uint8_t s_prev_buttons = 0;
+static int16_t s_scroll_acc_v = 0;
+static int16_t s_scroll_acc_h = 0;
+
+static int8_t clamp_i16_to_i8(int16_t v)
+{
+    if (v > 127) return 127;
+    if (v < -127) return -127;
+    return (int8_t)v;
+}
+
+static int8_t consume_scroll_steps(int16_t *acc, int16_t delta)
+{
+    *acc += delta;
+
+    int16_t steps = 0;
+    while (*acc >= TRACK_SCROLL_THRESHOLD) {
+        *acc -= TRACK_SCROLL_THRESHOLD;
+        steps++;
+    }
+    while (*acc <= -TRACK_SCROLL_THRESHOLD) {
+        *acc += TRACK_SCROLL_THRESHOLD;
+        steps--;
+    }
+
+    return clamp_i16_to_i8(steps);
+}
 
 // 受信レポートから出力へのマッピング情報
 typedef struct {
@@ -110,10 +142,6 @@ static void parse_mouse_descriptor(uint8_t const *desc, uint16_t len, mouse_map_
 void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
                                 uint8_t const *report, uint16_t len)
 {
-    static bool led = false;
-    led = !led;
-    gpio_put(LED_PIN, led);
-
     mouse_map_t const *map = &s_device_map[dev_addr < DEVICE_MAP_MAX ? dev_addr : 0];
 
     // Report ID がある場合は先頭1バイトをスキップ
@@ -125,11 +153,55 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
     hid_report_t r;
     r.len = 5;
     // デスクリプタ解析結果に基づいてバイトを取り出す
-    r.data[0] = (map->btn_byte   >= 0 && map->btn_byte   < (int8_t)len) ? report[map->btn_byte]   : 0;
-    r.data[1] = (map->x_byte     >= 0 && map->x_byte     < (int8_t)len) ? report[map->x_byte]     : 0;
-    r.data[2] = (map->y_byte     >= 0 && map->y_byte     < (int8_t)len) ? report[map->y_byte]     : 0;
-    r.data[3] = (map->wheel_byte >= 0 && map->wheel_byte < (int8_t)len) ? report[map->wheel_byte] : 0;
-    r.data[4] = (map->hwheel_byte >= 0 && map->hwheel_byte < (int8_t)len) ? report[map->hwheel_byte] : 0;
+    uint8_t src_btn = (map->btn_byte >= 0 && map->btn_byte < (int8_t)len) ? report[map->btn_byte] : 0;
+    int8_t src_x = (map->x_byte >= 0 && map->x_byte < (int8_t)len) ? (int8_t)report[map->x_byte] : 0;
+    int8_t src_y = (map->y_byte >= 0 && map->y_byte < (int8_t)len) ? (int8_t)report[map->y_byte] : 0;
+    int8_t src_wheel = (map->wheel_byte >= 0 && map->wheel_byte < (int8_t)len) ? (int8_t)report[map->wheel_byte] : 0;
+    int8_t src_hwheel = (map->hwheel_byte >= 0 && map->hwheel_byte < (int8_t)len) ? (int8_t)report[map->hwheel_byte] : 0;
+
+    // X1 の立ち上がりでトラックスクロールモードをトグル
+    bool prev_track_scroll_mode = s_track_scroll_mode;
+    bool x1_pressed = (src_btn & BTN_X1_MASK) != 0;
+    bool x1_prev_pressed = (s_prev_buttons & BTN_X1_MASK) != 0;
+    if (x1_pressed && !x1_prev_pressed) {
+        s_track_scroll_mode = !s_track_scroll_mode;
+    }
+    if (s_track_scroll_mode != prev_track_scroll_mode) {
+        s_scroll_acc_v = 0;
+        s_scroll_acc_h = 0;
+    }
+
+    // モード中にX1以外のボタンが押されたら解除し、当該レポートは送信しない
+    if (s_track_scroll_mode && (src_btn & BTN_NON_X1_MASK) != 0) {
+        s_track_scroll_mode = false;
+        s_scroll_acc_v = 0;
+        s_scroll_acc_h = 0;
+        s_prev_buttons = src_btn;
+        gpio_put(LED_PIN, true);
+        tuh_hid_receive_report(dev_addr, instance);
+        return;
+    }
+
+    s_prev_buttons = src_btn;
+    gpio_put(LED_PIN, s_track_scroll_mode ? false : true);
+
+    // 出力は Left/Middle/Right のみ
+    r.data[0] = (uint8_t)(src_btn & BTN_MASK_OUT);
+
+    if (s_track_scroll_mode) {
+        // モード中は移動量を縦横スクロールに変換
+        int8_t v_steps = consume_scroll_steps(&s_scroll_acc_v, (int16_t)src_wheel - (int16_t)src_y);
+        int8_t h_steps = consume_scroll_steps(&s_scroll_acc_h, (int16_t)src_hwheel + (int16_t)src_x);
+        r.data[1] = 0;
+        r.data[2] = 0;
+        r.data[3] = (uint8_t)v_steps;
+        r.data[4] = (uint8_t)h_steps;
+    } else {
+        r.data[1] = (uint8_t)src_x;
+        r.data[2] = (uint8_t)src_y;
+        r.data[3] = (uint8_t)src_wheel;
+        r.data[4] = (uint8_t)src_hwheel;
+    }
     queue_try_add(&s_report_queue, &r);
 
     tuh_hid_receive_report(dev_addr, instance);
@@ -141,13 +213,6 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance,
     // デスクリプタを解析してX/Y/Wheel/Buttonのバイト位置を特定
     mouse_map_t *map = &s_device_map[dev_addr < DEVICE_MAP_MAX ? dev_addr : 0];
     parse_mouse_descriptor(desc_report, desc_len, map);
-
-    // Debug: hwheel_byte が見つかったかLEDで表示
-    if (map->hwheel_byte >= 0) {
-        gpio_put(LED_PIN, false);  // Found horizontal wheel (LED ON)
-    } else {
-        gpio_put(LED_PIN, true);   // Not found (LED OFF)
-    }
 
     uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
     if (itf_protocol == HID_ITF_PROTOCOL_MOUSE) {
@@ -169,6 +234,10 @@ void tuh_hid_set_protocol_complete_cb(uint8_t dev_addr, uint8_t instance, uint8_
 void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance)
 {
     (void)dev_addr; (void)instance;
+    s_track_scroll_mode = false;
+    s_prev_buttons = 0;
+    s_scroll_acc_v = 0;
+    s_scroll_acc_h = 0;
     gpio_put(LED_PIN, true);
 }
 
