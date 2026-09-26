@@ -193,8 +193,8 @@ int main(void)
 
     multicore_launch_core1(Core1Main);
 
-    uint32_t last_blink = 0;
-    bool led_state = false;
+    // uint32_t last_blink = 0;
+    // bool led_state = false;
 
     while (true) {
         tud_task();
