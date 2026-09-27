@@ -2,12 +2,18 @@
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "pico/util/queue.h"
+#include "hardware/uart.h"
 #include "pio_usb.h"
 #include "tusb.h"
+#include "ArrayCap.h"
+#include "HidMouseDescriptorMap.h"
 
 #define LED_PIN           25
 #define BLINK_INTERVAL_MS 1000
 #define USB_DP_PIN        0   // D+ = GPIO 0, D- = GPIO 1 (自動)
+#define DEBUG_UART_ID     uart0
+#define DEBUG_UART_BAUD   115200
+#define DEBUG_UART_TX_PIN 16
 #define BTN_MASK_OUT      0x07
 #define BTN_X1_MASK       0x08
 #define BTN_NON_X1_MASK   ((uint8_t)~BTN_X1_MASK)
@@ -26,6 +32,17 @@ static bool s_track_scroll_mode = false;
 static uint8_t s_prev_buttons = 0;
 static int16_t s_scroll_acc_v = 0;
 static int16_t s_scroll_acc_h = 0;
+
+static void debug_uart_init(void)
+{
+    uart_init(DEBUG_UART_ID, DEBUG_UART_BAUD);
+    gpio_set_function(DEBUG_UART_TX_PIN, GPIO_FUNC_UART);
+}
+
+static void debug_uart_puts(char const *s)
+{
+    uart_puts(DEBUG_UART_ID, s);
+}
 
 static int8_t clamp_i16_to_i8(int16_t v)
 {
@@ -52,100 +69,21 @@ static int8_t consume_scroll_steps(int16_t *acc, int16_t delta)
 }
 
 // 受信レポートから出力へのマッピング情報
-typedef struct {
-    uint8_t report_id;    // 0 = なし
-    int8_t  btn_byte;     // ボタンバイトオフセット (-1 = 不明)
-    int8_t  x_byte;
-    int8_t  y_byte;
-    int8_t  wheel_byte;
-    int8_t  hwheel_byte;  // 横ホイール
-} mouse_map_t;
-
 // dev_addr は 1-based で最大 CFG_TUH_DEVICE_MAX
 #define DEVICE_MAP_MAX (CFG_TUH_DEVICE_MAX + 1)
-static mouse_map_t s_device_map[DEVICE_MAP_MAX];
-
-// HIDデスクリプタを解析してマウスのバイトマップを構築
-static void parse_mouse_descriptor(uint8_t const *desc, uint16_t len, mouse_map_t *map)
-{
-    map->report_id  = 0;
-    map->btn_byte   = -1;
-    map->x_byte     = -1;
-    map->y_byte     = -1;
-    map->wheel_byte = -1;
-    map->hwheel_byte = -1;
-
-    uint16_t usage_page = 0;
-    int32_t  bit_offset = 0;  // report ID除く先頭からのビット位置
-    uint8_t  report_size  = 0;
-    uint8_t  report_count = 0;
-
-    // pending usages for multi-usage items (1/2-byte usage values)
-    uint16_t pending_usages[8];
-    uint8_t pending_count = 0;
-
-    uint16_t i = 0;
-    while (i < len) {
-        uint8_t tag  = desc[i] & 0xFC;
-        uint8_t size = desc[i] & 0x03;
-        i++;
-
-        uint32_t val = 0;
-        for (uint8_t s = 0; s < size; s++) {
-            val |= ((uint32_t)desc[i++]) << (8 * s);
-        }
-
-        switch (tag) {
-            case 0x04: usage_page   = (uint16_t)val; break;  // Usage Page
-            case 0x08: if (pending_count < 8) pending_usages[pending_count++] = (uint16_t)val; break; // Usage
-            case 0x74: report_size  = (uint8_t)val;  break;  // Report Size
-            case 0x94: report_count = (uint8_t)val;  break;  // Report Count
-            case 0x84: map->report_id = (uint8_t)val; break; // Report ID
-            case 0xA0: pending_count = 0; break;              // Collection
-            case 0xC0: pending_count = 0; break;              // End Collection
-            case 0x80: {  // Input
-                bool is_const = (val & 0x01) != 0;
-                if (is_const) {
-                    // padding
-                } else if (usage_page == 0x09) {
-                    // Button page
-                    if (map->btn_byte < 0) map->btn_byte = (int8_t)(bit_offset / 8);
-                } else if (usage_page == 0x01 || usage_page == 0x0C) {
-                    // Generic Desktop / Consumer (AC Pan)
-                    uint8_t apply = (pending_count > 0 && pending_count <= report_count)
-                                    ? pending_count : report_count;
-                    for (uint8_t u = 0; u < apply && u < pending_count; u++) {
-                        int8_t byte_pos = (int8_t)((bit_offset + u * report_size) / 8);
-                        if (usage_page == 0x01) {
-                            switch (pending_usages[u]) {
-                                case 0x30: map->x_byte     = byte_pos; break;  // X
-                                case 0x31: map->y_byte     = byte_pos; break;  // Y
-                                case 0x38: map->wheel_byte = byte_pos; break;  // Wheel
-                            }
-                        } else if (usage_page == 0x0C) {
-                            if (pending_usages[u] == 0x0238) {
-                                map->hwheel_byte = byte_pos;  // AC Pan
-                            }
-                        }
-                    }
-                }
-                bit_offset += report_size * report_count;
-                pending_count = 0;
-                break;
-            }
-        }
-    }
-}
+static HidMouseDescriptorMap s_device_map[DEVICE_MAP_MAX];
 
 // ---- HID Host コールバック (Core1 から呼ばれる) ----
 
-void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
-                                uint8_t const *report, uint16_t len)
+void tuh_hid_report_received_cb(
+    uint8_t dev_addr, uint8_t instance,
+    uint8_t const *report, uint16_t len)
 {
-    mouse_map_t const *map = &s_device_map[dev_addr < DEVICE_MAP_MAX ? dev_addr : 0];
+    const HidMouseDescriptorMap *map =
+        &s_device_map[dev_addr < DEVICE_MAP_MAX ? dev_addr : 0];
 
     // Report ID がある場合は先頭1バイトをスキップ
-    if (map->report_id != 0 && len > 0) {
+    if (map->ReportId != 0 && len > 0) {
         report++;
         len--;
     }
@@ -153,11 +91,11 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
     hid_report_t r;
     r.len = 5;
     // デスクリプタ解析結果に基づいてバイトを取り出す
-    uint8_t src_btn = (map->btn_byte >= 0 && map->btn_byte < (int8_t)len) ? report[map->btn_byte] : 0;
-    int8_t src_x = (map->x_byte >= 0 && map->x_byte < (int8_t)len) ? (int8_t)report[map->x_byte] : 0;
-    int8_t src_y = (map->y_byte >= 0 && map->y_byte < (int8_t)len) ? (int8_t)report[map->y_byte] : 0;
-    int8_t src_wheel = (map->wheel_byte >= 0 && map->wheel_byte < (int8_t)len) ? (int8_t)report[map->wheel_byte] : 0;
-    int8_t src_hwheel = (map->hwheel_byte >= 0 && map->hwheel_byte < (int8_t)len) ? (int8_t)report[map->hwheel_byte] : 0;
+    uint8_t src_btn = (uint8_t)HidMouseDescriptorMap_Buttons(report, len, map);
+    int8_t src_x = (int8_t)HidMouseDescriptorMap_X(report, len, map);
+    int8_t src_y = (int8_t)HidMouseDescriptorMap_Y(report, len, map);
+    int8_t src_wheel = (int8_t)HidMouseDescriptorMap_VWheel(report, len, map);
+    int8_t src_hwheel = (int8_t)HidMouseDescriptorMap_HWheel(report, len, map);
 
     // X1 の立ち上がりでトラックスクロールモードをトグル
     bool prev_track_scroll_mode = s_track_scroll_mode;
@@ -209,10 +147,13 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
 void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance,
                       uint8_t const *desc_report, uint16_t desc_len)
 {
+    debug_uart_puts("[HID] mounting...\r\n");
 
     // デスクリプタを解析してX/Y/Wheel/Buttonのバイト位置を特定
-    mouse_map_t *map = &s_device_map[dev_addr < DEVICE_MAP_MAX ? dev_addr : 0];
-    parse_mouse_descriptor(desc_report, desc_len, map);
+    HidMouseDescriptorMap *map = 
+        &s_device_map[dev_addr < DEVICE_MAP_MAX ? dev_addr : 0];
+    HidMouseDescriptorMap_Parse(desc_report, desc_len, map);
+    debug_uart_puts("[HID] mounted\r\n");
 
     uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
     if (itf_protocol == HID_ITF_PROTOCOL_MOUSE) {
@@ -228,6 +169,7 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance,
 void tuh_hid_set_protocol_complete_cb(uint8_t dev_addr, uint8_t instance, uint8_t protocol)
 {
     (void)protocol;
+    debug_uart_puts("[HID] protocol set\r\n");
     tuh_hid_receive_report(dev_addr, instance);
 }
 
@@ -245,6 +187,11 @@ void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance)
 
 static void Core1Main(void)
 {
+    for (int i = 0; i < CAPACITY_OF(s_device_map); i++)
+    {
+        HidMouseDescriptorMap_Init(&s_device_map[i]);
+    }
+
     pio_usb_configuration_t pio_cfg = PIO_USB_DEFAULT_CONFIG;
     pio_cfg.pin_dp = USB_DP_PIN;
 
@@ -262,6 +209,9 @@ int main(void)
 {
     queue_init(&s_report_queue, sizeof(hid_report_t), REPORT_QUEUE_SIZE);
 
+    debug_uart_init();
+    debug_uart_puts("[BOOT] start\r\n");
+
     gpio_init(LED_PIN);
     gpio_set_dir(LED_PIN, GPIO_OUT);
 
@@ -269,6 +219,7 @@ int main(void)
     tud_init(0);
 
     multicore_launch_core1(Core1Main);
+    debug_uart_puts("[BOOT] core1 launched\r\n");
 
     // uint32_t last_blink = 0;
     // bool led_state = false;
