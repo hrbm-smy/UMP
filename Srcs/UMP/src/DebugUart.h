@@ -41,7 +41,7 @@ SOFTWARE.
  * Debug UART 有効/無効
  * 1=有効
  */
-#define DEBUGUART_ENABLED (1)
+// #define DEBUGUART_ENABLED (1)
 
 /* --------------------------------------------------------------------------
  *  P U B L I C   I N T E R F A C E S

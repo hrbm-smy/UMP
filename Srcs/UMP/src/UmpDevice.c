@@ -40,6 +40,8 @@ SOFTWARE.
 #include "Decoders.h"
 #include "MinMax.h"
 
+#include "DebugUart.h"
+
 #include "pio_usb.h"
 #include "tusb.h"
 
@@ -75,10 +77,6 @@ static UmpDevice _instance;
 #define UMPDEVICE_MODE_TRACKSCROLL (1)
 
 /** @}*/
-
-#define BUTTON_X1_MASK (0x08)
-
-#define UMPDEVICE_TRACK_SCROLL_THRESHOLD (16)
 
 /* --------------------------------------------------------------------------
  *  P U B L I C   I N T E R F A C E S
@@ -154,6 +152,7 @@ static void UmpDevice_Descriptor(
             HidMouseDescriptorMap_Init(mouseMap);
             HidMouseDescriptorMap_Parse(
                 descPack.ReportDesc, descPack.DescLength, mouseMap);
+            DEBUGUART_PUTS("[UMPDEV] Mapped\r\n");
         }
     }
 }
@@ -168,9 +167,8 @@ static int ShouldEnterTrackScrollMode(
     int result = 0;
 
     if ((currentMode == 0) &&
-        (button & BUTTON_X1_MASK))
+        (button & 0x02))
     {
-        // いまんとこX1でトラックスクロールモードに入る
         result = 1;
     }
 
@@ -192,6 +190,44 @@ static int ShouldExitTrackScrollMode(
         // なんか押されりゃ戻る
         result = 1;
     }
+
+    return result;
+}
+
+static uint32_t RemapButtons(
+    uint32_t button,
+    const UmpConfig *config)
+{
+    (void)config;
+
+    uint32_t result = 0;
+
+    // 左ボタン
+    if (button & 0x01)
+    {
+        result |= 0x01;
+    }
+    if (button & 0x10)
+    {
+        result |= 0x01;
+    }
+    // 右ボタン
+    if (button & 0x80)
+    {
+        result |= 0x02;
+    }
+    // 中ボタン
+    if (button & 0x04)
+    {
+        result |= 0x04;
+    }
+    // X1ボタン
+    if (button & 0x08)
+    {
+        result |= 0x08;
+    }
+    // X2ボタン
+    // 左ボタンに割り当てているためなし
 
     return result;
 }
@@ -241,24 +277,45 @@ static void UmpDevice_ExtendedReport(
     // ボタンデータ取得
     uint32_t button = HidMouseDescriptorMap_Buttons(
         reportPack->Report, reportLen, mouseMap);
+#if (DEBUGUART_ENABLED == 1)
+    {
+        char msg[128];
+        sniprintf(
+            msg, sizeof msg,
+            "[UMPDEV] button: 0x%x\r\n",
+            (unsigned int)button);
+        DEBUGUART_PUTS(msg);
+    }
+#endif
 
     // ボタンが「押された」「放された」エッジを検知
     uint32_t lastButton = ctxt->ButtonState;
-    uint32_t buttonPressed = ctxt->ButtonState | button;
+    // uint32_t buttonPressed = ctxt->ButtonState | button;
     // uint32_t buttonReleased = ~(ctxt->ButtonState & button);
     ctxt->ButtonState = button;
 
     // トラックスクロールON/OFF判定、モード遷移
     // これは「押下」エッジで遷移
     int32_t lastMode = ctxt->Mode;
-    if (ShouldEnterTrackScrollMode(buttonPressed, ctxt->Mode, NULL))
+    if (ShouldEnterTrackScrollMode(button, ctxt->Mode, NULL))
     {
         ctxt->Mode = UMPDEVICE_MODE_TRACKSCROLL;
     }
-    else if (ShouldExitTrackScrollMode(buttonPressed, ctxt->Mode, NULL))
+    else if (ShouldExitTrackScrollMode(button, ctxt->Mode, NULL))
     {
         ctxt->Mode = 0;
     }
+
+#if (DEBUGUART_ENABLED == 1)
+    {
+        char msg[128];
+        sniprintf(
+            msg, sizeof msg,
+            "[UMPDEV] Mode: %d\r\n",
+            (int)ctxt->Mode);
+        DEBUGUART_PUTS(msg);
+    }
+#endif
 
     if ((ctxt->Mode != lastMode) &&
         (ctxt->ButtonState != lastButton))
@@ -296,44 +353,50 @@ static void UmpDevice_ExtendedReport(
                 yAcc += hy;
             }
 
-            // ただし、最終的に判断するにおいて、絶対値で判定する。
+            // ただし、最終的に判断するにおいては、絶対値で判定する。
             // これで、「傾向」になる。
             // ハズ。
-            int dir = 0;
-            if (abs(yAcc) > abs(xAcc))
+            int dir = 0; // 垂直スクロール(Y方向)
+            if (abs(xAcc) > abs(yAcc))
             {
-                dir = 1;
+                dir = 1; // 水平スクロール(X方向)
             }
 
             // 最終的にレポートをまとめていくよ。
             uint8_t report[5];
             memset(report, 0, sizeof report);
 
-            // ボタンはそのまま
-            report[0] = button;
+            // ボタンはリマッピング
+            report[0] = RemapButtons(button, inputs->Config);
+
             // Xは0
             report[1] = 0;
             // Yも0
             report[2] = 0;
 
             // で、ここでやっとどれだけスクロールするか。
-            // ここでは傾向関係ない。
             if (dir == 0)
             {
-                int32_t x = HidMouseDescriptorMap_X(
+                // 垂直スクロール(Y方向)
+                int32_t y = HidMouseDescriptorMap_Y(
                     reportPack->Report, reportLen, mouseMap);
                 int8_t steps = consume_scroll_steps(
-                    &ctxt->ScrollAcc, x,
-                    UMPDEVICE_TRACK_SCROLL_THRESHOLD);
+                    &ctxt->ScrollAcc,
+                    -y, // 垂直は方向を逆にする
+                    inputs->Config->TrackScrollThreshold);
+
                 report[3] = steps;
             }
             else
             {
-                int32_t y = HidMouseDescriptorMap_Y(
+                // 水平スクロール(X方向)
+                int32_t x = HidMouseDescriptorMap_X(
                     reportPack->Report, reportLen, mouseMap);
                 int8_t steps = consume_scroll_steps(
-                    &ctxt->ScrollAcc, y,
-                    UMPDEVICE_TRACK_SCROLL_THRESHOLD);
+                    &ctxt->ScrollAcc,
+                    x,
+                    inputs->Config->TrackScrollThreshold);
+
                 report[4] = steps;
             }
 
@@ -346,7 +409,8 @@ static void UmpDevice_ExtendedReport(
             uint8_t report[5];
             memset(report, 0, sizeof report);
 
-            report[0] = (uint8_t)button;
+            // とはいえボタンのリマッピングは行う
+            report[0] = RemapButtons(button, inputs->Config);
             report[1] = HidMouseDescriptorMap_X(
                 reportPack->Report, reportLen, mouseMap);
             report[2] = HidMouseDescriptorMap_Y(
@@ -356,6 +420,14 @@ static void UmpDevice_ExtendedReport(
             report[4] = HidMouseDescriptorMap_HWheel(
                 reportPack->Report, reportLen, mouseMap);
 
+#if (DEBUGUART_ENABLED == 1)
+            char msg[128];
+            sniprintf(
+                msg, sizeof msg,
+                "[UMPDEV] Normal mode transfer: 0x%x, 0x%x, 0x%x\r\n",
+                report[0], report[1], report[2]);
+            DEBUGUART_PUTS(msg);
+#endif
             tud_hid_report(1, report, sizeof report);
         }
     }
@@ -377,6 +449,7 @@ static void UmpDevice_Report(
         if (mouseMap == NULL)
         {
             // 対応づけられない場合はデフォルト動作
+            // ボタンとマウスカーソルポインタのX、Yだけ
             uint8_t report[5];
             memset(report, 0, sizeof report);
             report[0] = Decoders_Defaulted8At(

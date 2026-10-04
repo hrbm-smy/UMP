@@ -292,6 +292,12 @@ uint32_t HidMouseDescriptorMap_Buttons(
 
     if (ctxt != NULL)
     {
+        if (ctxt->ReportId != 0)
+        {
+            report++;
+            len--;
+        }
+
         result = get_value(
             ctxt->ButtonIndex, ctxt->ButtonSize,
             report, len);
@@ -316,6 +322,12 @@ int32_t HidMouseDescriptorMap_X(
 
     if (ctxt != NULL)
     {
+        if (ctxt->ReportId != 0)
+        {
+            report++;
+            len--;
+        }
+
         uint32_t v = get_value(
             ctxt->XIndex, ctxt->XSize,
             report, len);
@@ -342,6 +354,12 @@ int32_t HidMouseDescriptorMap_Y(
 
     if (ctxt != NULL)
     {
+        if (ctxt->ReportId != 0)
+        {
+            report++;
+            len--;
+        }
+
         uint32_t v = get_value(
             ctxt->YIndex, ctxt->YSize,
             report, len);
@@ -368,6 +386,12 @@ int32_t HidMouseDescriptorMap_VWheel(
 
     if (ctxt != NULL)
     {
+        if (ctxt->ReportId != 0)
+        {
+            report++;
+            len--;
+        }
+
         uint32_t v = get_value(
             ctxt->VWheelIndex, ctxt->VWheelSize,
             report, len);
@@ -394,6 +418,12 @@ int32_t HidMouseDescriptorMap_HWheel(
 
     if (ctxt != NULL)
     {
+        if (ctxt->ReportId != 0)
+        {
+            report++;
+            len--;
+        }
+
         uint32_t v = get_value(
             ctxt->HWheelIndex, ctxt->HWheelSize,
             report, len);

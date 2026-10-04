@@ -40,6 +40,7 @@ SOFTWARE.
 #include "HidReportDescriptorRing.h"
 #include "HidReportRing.h"
 #include "HidMouseDescriptorMap.h"
+#include "UmpConfig.h"
 
 /* --------------------------------------------------------------------------
  *  P U B L I C   D E F I N I T I O N S
@@ -63,18 +64,6 @@ SOFTWARE.
 extern "C"
 {
 #endif
-
-    /**
-     * コンフィグレーション。
-     */
-    typedef struct _UmpConfig
-    {
-        /**
-         * とりあえずプレースホルダ。
-         * 将来に期待。
-         */
-        int32_t _reserved[4];
-    } UmpConfig;
 
     /**
      * USB Mouse Proxy Device
@@ -129,6 +118,7 @@ extern "C"
      */
     typedef struct _UmpDevice_Drive_In
     {
+        const UmpConfig *Config;
         HidReportDescriptorRing *DescRing;
         HidReportRing *ReportRing;
     } UmpDevice_Drive_In;
