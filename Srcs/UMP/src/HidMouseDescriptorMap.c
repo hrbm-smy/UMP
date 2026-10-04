@@ -277,39 +277,6 @@ static uint32_t get_value(
 }
 
 /**
- *  @brief nビット値符号拡張 @n
- *    指定されたビット幅の値を32ビット符号付き整数に符号拡張する。
- *  @param value 拡張する値。
- *  @param bits ビット幅（1～32）。
- *  @return 符号拡張された値。
- */
-static int32_t extend_sign(
-    uint32_t value, int bits)
-{
-    if (bits <= 0)
-    {
-        return 0;
-    }
-
-    // ビット数が32以上なら拡張不要
-    if (bits >= 32)
-    {
-        return (int32_t)value;
-    }
-
-    // MSB位置を計算
-    int msb_pos = bits - 1;
-
-    // MSBが1なら符号拡張（上位ビットを1で埋める）
-    if (value & (1U << msb_pos))
-    {
-        value |= (uint32_t)(~0) << bits;
-    }
-
-    return (int32_t)value;
-}
-
-/**
  *  @brief HID マウス ディスクリプタ マップ ボタン取得 @n
  *    レポートからボタン(ビット列)データを取得する。
  *  @param report レポート。
@@ -353,7 +320,7 @@ int32_t HidMouseDescriptorMap_X(
             ctxt->XIndex, ctxt->XSize,
             report, len);
 
-        result = extend_sign(v, ctxt->XSize);
+        result = SignExtend(v, ctxt->XSize);
     }
 
     return result;
@@ -379,7 +346,7 @@ int32_t HidMouseDescriptorMap_Y(
             ctxt->YIndex, ctxt->YSize,
             report, len);
 
-        result = extend_sign(v, ctxt->YSize);
+        result = SignExtend(v, ctxt->YSize);
     }
 
     return result;
@@ -405,7 +372,7 @@ int32_t HidMouseDescriptorMap_VWheel(
             ctxt->VWheelIndex, ctxt->VWheelSize,
             report, len);
 
-        result = extend_sign(v, ctxt->VWheelSize);
+        result = SignExtend(v, ctxt->VWheelSize);
     }
 
     return result;
@@ -431,7 +398,7 @@ int32_t HidMouseDescriptorMap_HWheel(
             ctxt->HWheelIndex, ctxt->HWheelSize,
             report, len);
 
-        result = extend_sign(v, ctxt->HWheelSize);
+        result = SignExtend(v, ctxt->HWheelSize);
     }
 
     return result;
