@@ -202,32 +202,33 @@ static uint32_t RemapButtons(
 
     uint32_t result = 0;
 
-    // 左ボタン
-    if (button & 0x01)
+    // 主ボタン
+    if (button & 0x01) // 入力主ボタンを
     {
-        result |= 0x01;
+        result |= 0x01; // 出力主ボタンに
     }
-    if (button & 0x10)
+    if (button & 0x08) // 入力X1ボタンを
     {
-        result |= 0x01;
+        result |= 0x01; // 出力主ボタンに
     }
-    // 右ボタン
-    if (button & 0x80)
+    if (button & 0x10) // 入力X2ボタンを
     {
-        result |= 0x02;
+        result |= 0x01; // 出力主ボタンに
+    }
+    // 副ボタン
+    if (button & 0x80) // Fn3ボタンを
+    {
+        result |= 0x02; // 副ボタンに
     }
     // 中ボタン
-    if (button & 0x04)
+    if (button & 0x04) // 中ボタンを
     {
-        result |= 0x04;
+        result |= 0x04; // 中ボタンに
     }
     // X1ボタン
-    if (button & 0x08)
-    {
-        result |= 0x08;
-    }
+    // 主ボタンに割り当てているためなし
     // X2ボタン
-    // 左ボタンに割り当てているためなし
+    // 主ボタンに割り当てているためなし
 
     return result;
 }
@@ -401,7 +402,29 @@ static void UmpDevice_ExtendedReport(
             }
 
             // で、レポート送信。
-            tud_hid_report(1, report, sizeof report);
+            int shouldSend = 0;
+            // とはいえ、
+            if (lastButton ^ button)
+            {
+                // ボタン変化あれば送る。
+                shouldSend = 1;
+            }
+            else if (report[3] != 0)
+            {
+                // 垂直スクロールあれば送る。
+                shouldSend = 1;
+            }
+            else if (report[4] != 0)
+            {
+                // 水平スクロールあれば送る。
+                shouldSend = 1;
+            }
+
+            if (shouldSend)
+            {
+                // なにか送るべき時は送信する。
+                tud_hid_report(1, report, sizeof report);
+            }
         }
         else
         {

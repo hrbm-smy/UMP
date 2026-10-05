@@ -36,7 +36,7 @@ SOFTWARE.
  */
 
 static const UmpConfig _defaultConfig = {
-    .TrackScrollThreshold = 16,
+    .TrackScrollThreshold = 24,
 };
 
 /* --------------------------------------------------------------------------
