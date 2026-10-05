@@ -1,0 +1,80 @@
+﻿Processing ump (platform: https://github.com/maxgerhardt/platform-raspberrypi.git; board: pico; framework: picosdk; lib_deps: R:\Owned\UMP\WCs\main\Srcs\UMP/lib/pico-pio-usb; lib_compat_mode: off; build_unflags: -w; build_flags: -Wall, -I$PROJECT_DIR/include, -I$PROJECT_DIR/lib/pico-pio-usb/src, -DPICO_STDIO_USB_USE_DEFAULT_DESCRIPTORS=0)
+--------------------------------------------------------------------------------
+Removing unused dependencies...
+Library Manager: Removing Pico PIO USB @ 0.7.2
+Library Manager: Removing dependencies...
+Library Manager: Pico PIO USB@0.7.2 has been removed!
+Library Manager: Installing file://R:\Owned\UMP\WCs\main\Srcs\UMP/lib/pico-pio-usb
+Library Manager: Pico PIO USB@0.7.2 has been installed!
+Library Manager: Resolving dependencies...
+CONFIGURATION: https://docs.platformio.org/page/boards/raspberrypi/pico.html
+PLATFORM: Raspberry Pi RP2040 (1.20.0+sha.5d4561a) (git+https://github.com/maxgerhardt/platform-raspberrypi.git) > Raspberry Pi Pico
+HARDWARE: RP2040 133MHz, 256KB RAM, 2MB Flash
+DEBUG: Current (blackmagic) External (blackmagic, cmsis-dap, jlink, pico-debug, picoprobe, raspberrypi-swd)
+PACKAGES: 
+ - framework-picosdk @ 1.20200.0+sha.4315984 (git+https://github.com/maxgerhardt/pico-sdk.git#4315984000afe20ac82c78c597a3c4a591f524b0) 
+ - tool-picotool-rp2040-earlephilhower @ 5.160100.260719 (16.1.0, https://github.com/earlephilhower/pico-quick-toolchain/releases/download/5.0.0/x86_64-w64-mingw32.picotool-6f6458d.260719.zip) 
+ - tool-pioasm-rp2040-earlephilhower @ 5.160100.260719 (16.1.0, https://github.com/earlephilhower/pico-quick-toolchain/releases/download/5.0.0/x86_64-w64-mingw32.pioasm-98a542c1.260719.zip) 
+ - toolchain-gccarmnoneeabi @ 1.90201.191206 (9.2.1)
+Using known Pico-SDK board header for pico: pico.h
+No stdio implementation defined, defaulting to USB.
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ chain, Compatibility ~ off
+Found 3 compatible libraries
+Scanning dependencies...
+Dependency Graph
+|-- Pico PIO USB @ 0.7.2 (License: Unknown, Path: R:\Owned\UMP\WCs\main\Srcs\UMP\lib\pico-pio-usb)
+|-- LibCE (License: Unknown, Path: R:\Owned\UMP\WCs\main\Srcs\UMP\lib\LibCE)
+Building in release mode
+Flash size: 2.00MB
+Sketch size: 2.00MB
+Filesystem size: 0.00MB
+PSRAM size: 0.00MB
+Maximium Sketch size: 2093056 EEPROM start: 0x101ff000 Filesystem start: 0x101ff000 Filesystem end: 0x101ff000
+<lambda>(["checkprogsize"], [".pio\build\ump\firmware.elf"])
+new_check_size(["checkprogsize"], [".pio\build\ump\firmware.elf"])
+Advanced Memory Usage is available via "PlatformIO Home > Project Inspect"
+RAM:   [==        ]  21.7% (used 57012 bytes from 262144 bytes)
+Flash: [          ]   2.6% (used 54736 bytes from 2093056 bytes)
+.pio\build\ump\firmware.elf  :
+
+section                size        addr
+
+.boot2                  256   268435456
+
+.text                 28376   268435712
+
+.rodata                4512   268464088
+
+.binary_info             20   268468600
+
+.ram_vector_table       192   536870912
+
+.uninitialized_data      12   536871104
+
+.data                 21848   536871120
+
+.tdata                    0   536892968
+
+.tbss                     0   536892968
+
+.bss                  35164   536892968
+
+.heap                  2048   536928132
+
+.scratch_x                0   537133056
+
+.scratch_y                0   537137152
+
+.stack1_dummy          2048   537133056
+
+.stack_dummy           2048   537137152
+
+.ARM.attributes          40           0
+
+.comment                102           0
+
+.debug_frame           2928           0
+
+Total                 99594
+========================= [SUCCESS] Took 3.68 seconds =========================

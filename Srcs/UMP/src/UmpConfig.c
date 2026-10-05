@@ -37,6 +37,8 @@ SOFTWARE.
 
 static const UmpConfig _defaultConfig = {
     .TrackScrollThreshold = 24,
+    .HSchmittPercentage = 98, // 水平方向には少し入りづらく、
+    .VSchmittPercentage = 4, // 垂直方向には少し入りやすい
 };
 
 /* --------------------------------------------------------------------------

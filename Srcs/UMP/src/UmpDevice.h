@@ -37,6 +37,7 @@ SOFTWARE.
 
 #include "Map.h"
 #include "RingedFrames.h"
+#include "SchmittTrigger.h"
 #include "HidReportDescriptorRing.h"
 #include "HidReportRing.h"
 #include "HidMouseDescriptorMap.h"
@@ -111,6 +112,12 @@ extern "C"
          * スクロール累積。
          */
         int32_t ScrollAcc;
+
+        /**
+         * スクロール方向シュミットトリガ。
+         * State=0:垂直(縦)、State=非0:水平(横)
+         */
+        SchmittTrigger DirectionSchmitt;
     } UmpDevice;
 
     /**

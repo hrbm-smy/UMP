@@ -154,6 +154,13 @@ static void UmpDevice_Descriptor(
                 descPack.ReportDesc, descPack.DescLength, mouseMap);
             DEBUGUART_PUTS("[UMPDEV] Mapped\r\n");
         }
+
+        // スクロール方向シュミットトリガを初期化
+        SchmittTrigger_Init(
+            0,
+            inputs->Config->HSchmittPercentage, 1,
+            inputs->Config->VSchmittPercentage, 1,
+            &ctxt->DirectionSchmitt);
     }
 }
 
@@ -357,11 +364,14 @@ static void UmpDevice_ExtendedReport(
             // ただし、最終的に判断するにおいては、絶対値で判定する。
             // これで、「傾向」になる。
             // ハズ。
-            int dir = 0; // 垂直スクロール(Y方向)
-            if (abs(xAcc) > abs(yAcc))
-            {
-                dir = 1; // 水平スクロール(X方向)
-            }
+            int32_t hPercentage = (abs(xAcc) * 100) / (abs(xAcc) + abs(yAcc));
+            // さらに、シュミットトリガでねばる
+            int dir = SchmittTrigger_Drive(hPercentage, &ctxt->DirectionSchmitt);
+            // int dir = 0; // 垂直スクロール(Y方向)
+            // if (abs(xAcc) > abs(yAcc))
+            // {
+            //     dir = 1; // 水平スクロール(X方向)
+            // }
 
             // 最終的にレポートをまとめていくよ。
             uint8_t report[5];
@@ -379,8 +389,26 @@ static void UmpDevice_ExtendedReport(
             if (dir == 0)
             {
                 // 垂直スクロール(Y方向)
+                // 今回のY方向を取得
                 int32_t y = HidMouseDescriptorMap_Y(
                     reportPack->Report, reportLen, mouseMap);
+                // 前回のY方向を取得
+                const HidReportPacket *prev = RingedFrames_ReferWithNew(
+                    1, NULL, NULL, &ctxt->ReportHistRing);
+                int32_t py = y;
+                if (prev != NULL)
+                {
+                    py = HidMouseDescriptorMap_Y(
+                        prev->Report, prev->ReportLength, mouseMap);
+                }
+
+                // 符号が変わった場合、累積をリセットする
+                if ((py < 0) != (y < 0))
+                {
+                    ctxt->ScrollAcc = 0;
+                }
+
+                // んで、改めて累積
                 int8_t steps = consume_scroll_steps(
                     &ctxt->ScrollAcc,
                     -y, // 垂直は方向を逆にする
@@ -391,8 +419,26 @@ static void UmpDevice_ExtendedReport(
             else
             {
                 // 水平スクロール(X方向)
+                // 今回のX方向を取得
                 int32_t x = HidMouseDescriptorMap_X(
                     reportPack->Report, reportLen, mouseMap);
+                // 前回のX方向を取得
+                const HidReportPacket *prev = RingedFrames_ReferWithNew(
+                    1, NULL, NULL, &ctxt->ReportHistRing);
+                int32_t px = x;
+                if (prev != NULL)
+                {
+                    px = HidMouseDescriptorMap_X(
+                        prev->Report, prev->ReportLength, mouseMap);
+                }
+
+                // 符号が変わった場合、累積をリセットする
+                if ((px < 0) != (x < 0))
+                {
+                    ctxt->ScrollAcc = 0;
+                }
+
+                // んで、改めて累積
                 int8_t steps = consume_scroll_steps(
                     &ctxt->ScrollAcc,
                     x,
