@@ -392,6 +392,14 @@ static void UmpDevice_ExtendedReport(
                 // 今回のY方向を取得
                 int32_t y = HidMouseDescriptorMap_Y(
                     reportPack->Report, reportLen, mouseMap);
+
+                // 垂直は方向を逆にする
+                y = -y;
+
+                // 向きが変わったときのリセットはあったほうがよい気がする、
+                // のだが、なんか使用感がしっくりこない。
+                // 将来に期待。
+#if 0
                 // 前回のY方向を取得
                 const HidReportPacket *prev = RingedFrames_ReferWithNew(
                     1, NULL, NULL, &ctxt->ReportHistRing);
@@ -402,16 +410,29 @@ static void UmpDevice_ExtendedReport(
                         prev->Report, prev->ReportLength, mouseMap);
                 }
 
-                // 符号が変わった場合、累積をリセットする
-                if ((py < 0) != (y < 0))
-                {
-                    ctxt->ScrollAcc = 0;
-                }
+#if (DEBUGUART_ENABLED == 1)
+                                {
+                                    char msg[128];
+                                    sniprintf(
+                                        msg, sizeof msg,
+                                        "[UMPDEV] py=%d y=%d\r\n",
+                                        (int)py, (int)y);
+                                    DEBUGUART_PUTS(msg);
+                                }
+#endif
 
+                // 符号が変わった場合、累積をリセットする
+                if (((ctxt->ScrollAcc < 0) && (y > 0)) ||
+                    ((ctxt->ScrollAcc > 0) && (y < 0)))
+                {
+                    ctxt->ScrollAcc = inputs->Config->TrackScrollThreshold - 1;
+                    DEBUGUART_PUTS("[UMPDEV] Reset ScrollAcc on Y\r\n");
+                }
+#endif
                 // んで、改めて累積
                 int8_t steps = consume_scroll_steps(
                     &ctxt->ScrollAcc,
-                    -y, // 垂直は方向を逆にする
+                    y,
                     inputs->Config->TrackScrollThreshold);
 
                 report[3] = steps;
@@ -422,6 +443,11 @@ static void UmpDevice_ExtendedReport(
                 // 今回のX方向を取得
                 int32_t x = HidMouseDescriptorMap_X(
                     reportPack->Report, reportLen, mouseMap);
+
+                // 向きが変わったときのリセットはあったほうがよい気がする、
+                // のだが、なんか使用感がしっくりこない。
+                // 将来に期待。
+#if 0
                 // 前回のX方向を取得
                 const HidReportPacket *prev = RingedFrames_ReferWithNew(
                     1, NULL, NULL, &ctxt->ReportHistRing);
@@ -433,11 +459,13 @@ static void UmpDevice_ExtendedReport(
                 }
 
                 // 符号が変わった場合、累積をリセットする
-                if ((px < 0) != (x < 0))
+                if (((ctxt->ScrollAcc < 0) && (x > 0)) ||
+                    ((ctxt->ScrollAcc > 0) && (x < 0)))
                 {
-                    ctxt->ScrollAcc = 0;
+                    ctxt->ScrollAcc = inputs->Config->TrackScrollThreshold - 1;
+                    DEBUGUART_PUTS("[UMPDEV] Reset ScrollAcc on X\r\n");
                 }
-
+#endif
                 // んで、改めて累積
                 int8_t steps = consume_scroll_steps(
                     &ctxt->ScrollAcc,
