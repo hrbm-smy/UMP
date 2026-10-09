@@ -55,10 +55,67 @@ extern "C"
     typedef struct _UmpConfig
     {
         /**
+         * 主ボタン割り当て。
+         * D0:主ボタン
+         * D1:副ボタン
+         * D2:中ボタン
+         * D3:X1ボタン
+         * D4:X2ボタン
+         * D5:Fn1ボタン
+         * D6:Fn2ボタン
+         * D7:Fn3ボタン
+         */
+        uint32_t MainButtonAssigns;
+        /**
+         * 副ボタン割り当て。
+         * ビット割は主ボタン割り当てを参照。
+         */
+        uint32_t SubButtonAssigns;
+        /**
+         * 中ボタン割り当て。
+         * ビット割は主ボタン割り当てを参照。
+         */
+        uint32_t MiddleButtonAssigns;
+        /**
+         * X1ボタン割り当て。
+         * ビット割は主ボタン割り当てを参照。
+         */
+        uint32_t X1ButtonAssigns;
+        /**
+         * X2ボタン割り当て。
+         * ビット割は主ボタン割り当てを参照。
+         */
+        uint32_t X2ButtonAssigns;
+        /**
+         * Fn1ボタン割り当て。
+         * ビット割は主ボタン割り当てを参照。
+         */
+        uint32_t Fn1ButtonAssigns;
+        /**
+         * Fn2ボタン割り当て。
+         * ビット割は主ボタン割り当てを参照。
+         */
+        uint32_t Fn2ButtonAssigns;
+        /**
+         * Fn3ボタン割り当て。
+         * ビット割は主ボタン割り当てを参照。
+         */
+        uint32_t Fn3ButtonAssigns;
+
+        /**
+         * トラックスクロールモードエントリーボタン割り当て。
+         * ビット割は主ボタン割り当てを参照。
+         */
+        uint32_t TrackScrollEnterAssigns;
+        /**
+         * トラックスクロールモードエグジットボタン割り当て。
+         * ビット割は主ボタン割り当てを参照。
+         */
+        uint32_t TrackScrollExitAssigns;
+        /**
          * トラックスクロールしきい値。
          */
         int32_t TrackScrollThreshold;
-
         /**
          * 水平(横)スクロールシュミットトリガしきい値。
          * X方向の移動量がこのパラメータで指定した%以上になると

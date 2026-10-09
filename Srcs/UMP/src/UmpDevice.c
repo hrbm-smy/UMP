@@ -127,6 +127,9 @@ static void UmpDevice_Descriptor(
     const UmpDevice_Drive_In *inputs,
     UmpDevice *ctxt)
 {
+    // コンフィグを取りやすくしておこうか
+    const UmpConfig *config = inputs->Config;
+
     // レポートディスクリプタをPop
     HidReportDescriptorPacket descPack;
     int32_t descLen = HidReportDescriptorRing_Pop(&descPack, inputs->DescRing);
@@ -158,8 +161,8 @@ static void UmpDevice_Descriptor(
         // スクロール方向シュミットトリガを初期化
         SchmittTrigger_Init(
             0,
-            inputs->Config->HSchmittPercentage, 1,
-            inputs->Config->VSchmittPercentage, 1,
+            config->HSchmittPercentage, 1,
+            config->VSchmittPercentage, 1,
             &ctxt->DirectionSchmitt);
     }
 }
@@ -174,7 +177,7 @@ static int ShouldEnterTrackScrollMode(
     int result = 0;
 
     if ((currentMode == 0) &&
-        (button & 0x02))
+        (button & config->TrackScrollEnterAssigns))
     {
         result = 1;
     }
@@ -192,9 +195,8 @@ static int ShouldExitTrackScrollMode(
     int result = 0;
 
     if ((currentMode != 0) &&
-        (button != 0))
+        (button & config->TrackScrollExitAssigns))
     {
-        // なんか押されりゃ戻る
         result = 1;
     }
 
@@ -210,32 +212,45 @@ static uint32_t RemapButtons(
     uint32_t result = 0;
 
     // 主ボタン
-    if (button & 0x01) // 入力主ボタンを
+    if (button & config->MainButtonAssigns)
     {
-        result |= 0x01; // 出力主ボタンに
-    }
-    if (button & 0x08) // 入力X1ボタンを
-    {
-        result |= 0x01; // 出力主ボタンに
-    }
-    if (button & 0x10) // 入力X2ボタンを
-    {
-        result |= 0x01; // 出力主ボタンに
+        result |= 0x01;
     }
     // 副ボタン
-    if (button & 0x80) // Fn3ボタンを
+    if (button & config->SubButtonAssigns)
     {
         result |= 0x02; // 副ボタンに
     }
     // 中ボタン
-    if (button & 0x04) // 中ボタンを
+    if (button & config->MiddleButtonAssigns)
     {
         result |= 0x04; // 中ボタンに
     }
     // X1ボタン
-    // 主ボタンに割り当てているためなし
+    if (button & config->X1ButtonAssigns)
+    {
+        result |= 0x08;
+    }
     // X2ボタン
-    // 主ボタンに割り当てているためなし
+    if (button & config->X2ButtonAssigns)
+    {
+        result |= 0x10;
+    }
+    // Fn1ボタン
+    if (button & config->Fn1ButtonAssigns)
+    {
+        result |= 0x20;
+    }
+    // Fn2ボタン
+    if (button & config->Fn2ButtonAssigns)
+    {
+        result |= 0x40;
+    }
+    // Fn3ボタン
+    if (button & config->Fn3ButtonAssigns)
+    {
+        result |= 0x80;
+    }
 
     return result;
 }
@@ -277,6 +292,9 @@ static void UmpDevice_ExtendedReport(
     const UmpDevice_Drive_In *inputs,
     UmpDevice *ctxt)
 {
+    // コンフィグを取りやすくしておこうか
+    const UmpConfig *config = inputs->Config;
+
     // ともあれ履歴にPushしなおす
     RingedFrames_Push(
         reportPack, reportLen,
@@ -305,11 +323,11 @@ static void UmpDevice_ExtendedReport(
     // トラックスクロールON/OFF判定、モード遷移
     // これは「押下」エッジで遷移
     int32_t lastMode = ctxt->Mode;
-    if (ShouldEnterTrackScrollMode(button, ctxt->Mode, NULL))
+    if (ShouldEnterTrackScrollMode(button, ctxt->Mode, config))
     {
         ctxt->Mode = UMPDEVICE_MODE_TRACKSCROLL;
     }
-    else if (ShouldExitTrackScrollMode(button, ctxt->Mode, NULL))
+    else if (ShouldExitTrackScrollMode(button, ctxt->Mode, config))
     {
         ctxt->Mode = 0;
     }
@@ -378,7 +396,7 @@ static void UmpDevice_ExtendedReport(
             memset(report, 0, sizeof report);
 
             // ボタンはリマッピング
-            report[0] = RemapButtons(button, inputs->Config);
+            report[0] = RemapButtons(button, config);
 
             // Xは0
             report[1] = 0;
@@ -433,7 +451,7 @@ static void UmpDevice_ExtendedReport(
                 int8_t steps = consume_scroll_steps(
                     &ctxt->ScrollAcc,
                     y,
-                    inputs->Config->TrackScrollThreshold);
+                    config->TrackScrollThreshold);
 
                 report[3] = steps;
             }
@@ -470,7 +488,7 @@ static void UmpDevice_ExtendedReport(
                 int8_t steps = consume_scroll_steps(
                     &ctxt->ScrollAcc,
                     x,
-                    inputs->Config->TrackScrollThreshold);
+                    config->TrackScrollThreshold);
 
                 report[4] = steps;
             }
@@ -507,7 +525,7 @@ static void UmpDevice_ExtendedReport(
             memset(report, 0, sizeof report);
 
             // とはいえボタンのリマッピングは行う
-            report[0] = RemapButtons(button, inputs->Config);
+            report[0] = RemapButtons(button, config);
             report[1] = HidMouseDescriptorMap_X(
                 reportPack->Report, reportLen, mouseMap);
             report[2] = HidMouseDescriptorMap_Y(

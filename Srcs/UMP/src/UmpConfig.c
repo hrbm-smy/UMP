@@ -36,6 +36,17 @@ SOFTWARE.
  */
 
 static const UmpConfig _defaultConfig = {
+    .MainButtonAssigns = 0x19,
+    .SubButtonAssigns = 0x80,
+    .MiddleButtonAssigns = 0x04,
+    .X1ButtonAssigns = 0x00,
+    .X2ButtonAssigns = 0x00,
+    .Fn1ButtonAssigns = 0x00,
+    .Fn2ButtonAssigns = 0x00,
+    .Fn3ButtonAssigns = 0x00,
+
+    .TrackScrollEnterAssigns = 0x02,
+    .TrackScrollExitAssigns = 0xff,
     .TrackScrollThreshold = 20,
     .HSchmittPercentage = 80, // 水平方向には少し入りづらく、
     .VSchmittPercentage = 40, // 垂直方向には少し入りやすい
