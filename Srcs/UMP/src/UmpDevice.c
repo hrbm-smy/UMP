@@ -39,6 +39,7 @@ SOFTWARE.
 #include "nullptr.h"
 #include "Decoders.h"
 #include "MinMax.h"
+#include "ArrayCap.h"
 
 #include "DebugUart.h"
 
@@ -55,7 +56,7 @@ SOFTWARE.
  * @param instance インスタンス
  */
 #define UMPDEVICE_KEY(address, instance) \
-    ((((instance) << 8) & 0xff) |        \
+    ((((instance) << 8) & 0xff00) |      \
      (((address) << 0) & 0xff))
 
 /**
@@ -141,7 +142,7 @@ static void UmpDevice_Descriptor(
 
         // 無い場合には確保して対応づけ
         int32_t descMapCount = Map_Count(&ctxt->DescMap);
-        int32_t descMapCap = sizeof(ctxt->MouseDescs);
+        int32_t descMapCap = CAPACITY_OF(ctxt->MouseDescs);
         if ((mouseMap == nullptr) &&
             (descMapCount < descMapCap))
         {
@@ -270,16 +271,19 @@ static int8_t consume_scroll_steps(
     *acc += delta;
 
     int16_t steps = 0;
-    // 割り算とあまり……なんだが、ここはCPU性能にかんがみて
-    while (*acc >= threshold)
+    if (threshold > 0)
     {
-        *acc -= threshold;
-        steps++;
-    }
-    while (*acc <= -threshold)
-    {
-        *acc += threshold;
-        steps--;
+        // 割り算とあまり……なんだが、ここはCPU性能にかんがみて
+        while (*acc >= threshold)
+        {
+            *acc -= threshold;
+            steps++;
+        }
+        while (*acc <= -threshold)
+        {
+            *acc += threshold;
+            steps--;
+        }
     }
 
     return clamp_i32_to_i8(steps);
@@ -382,14 +386,19 @@ static void UmpDevice_ExtendedReport(
             // ただし、最終的に判断するにおいては、絶対値で判定する。
             // これで、「傾向」になる。
             // ハズ。
-            int32_t hPercentage = (abs(xAcc) * 100) / (abs(xAcc) + abs(yAcc));
-            // さらに、シュミットトリガでねばる
-            int dir = SchmittTrigger_Drive(hPercentage, &ctxt->DirectionSchmitt);
-            // int dir = 0; // 垂直スクロール(Y方向)
-            // if (abs(xAcc) > abs(yAcc))
-            // {
-            //     dir = 1; // 水平スクロール(X方向)
-            // }
+            // さらに、シュミットトリガでねばる。
+            int32_t denom = abs(xAcc) + abs(yAcc);
+            int32_t numer = abs(xAcc);
+            int32_t hPercentage = -1;
+            if (denom != 0)
+            {
+                hPercentage = (numer * 100) / denom;
+            }
+            int dir = SchmittTrigger_State(&ctxt->DirectionSchmitt);
+            if (hPercentage >= 0)
+            {
+                dir = SchmittTrigger_Drive(hPercentage, &ctxt->DirectionSchmitt);
+            }
 
             // 最終的にレポートをまとめていくよ。
             uint8_t report[5];
