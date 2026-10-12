@@ -12,7 +12,7 @@
 /*
 MIT License
 
-Copyright (c) 2021 Hirobumi Someya
+Copyright (c) 2026 Hirobumi Someya
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -36,11 +36,9 @@ SOFTWARE.
 #include <stdint.h>
 
 #include "Map.h"
-#include "RingedFrames.h"
-#include "SchmittTrigger.h"
 #include "HidReportDescriptorRing.h"
 #include "HidReportRing.h"
-#include "HidMouseDescriptorMap.h"
+#include "UmpMouse.h"
 #include "UmpConfig.h"
 
 /* --------------------------------------------------------------------------
@@ -48,14 +46,9 @@ SOFTWARE.
  */
 
 /**
- * リポートディスクリプタ マップ 最大容量
+ * マウス 最大容量
  */
-#define UMPDEVICE_DESC_CAP (4)
-
-/**
- * リポート履歴 最大容量
- */
-#define UMPDEVICE_REPORTHIST_CAP (32)
+#define UMPDEVICE_MICE_CAP (4)
 
 /* --------------------------------------------------------------------------
  *  P U B L I C   I N T E R F A C E S
@@ -72,52 +65,19 @@ extern "C"
     typedef struct _UmpDevice
     {
         /**
-         * リポートディスクリプタ マップ
+         * マウス マップ
          */
-        Map DescMap;
+        Map MouseMap;
         /**
-         * リポートディスクリプタ マップ要素リスト
+         * マウス マップ 要素リスト
          */
-        MapElm DescMapElms[UMPDEVICE_DESC_CAP];
+        MapElm MouseMapElms[UMPDEVICE_MICE_CAP];
 
         /**
-         * HID マウス ディスクリプタ マップ リスト
+         * マウス リスト
          */
-        HidMouseDescriptorMap MouseDescs[UMPDEVICE_DESC_CAP];
+        UmpMouse Mice[UMPDEVICE_MICE_CAP];
 
-        /**
-         * リポート履歴 リングバッファ
-         */
-        RingedFrames ReportHistRing;
-        /**
-         * リポート履歴 リングバッファ 用 バッファ
-         */
-        int32_t ReportHistBuffer[RF_NEEDED_BUFFER_WORDS(
-            UMPDEVICE_REPORTHIST_CAP,
-            sizeof(HidReportPacket))];
-
-        /**
-         * ボタンの現在状態。
-         */
-        uint32_t ButtonState;
-
-        /**
-         * 動作モード。
-         * 0:通常。
-         * 非0:各モード。UMPDEVICE_MODE_???を参照。
-         */
-        int32_t Mode;
-
-        /**
-         * スクロール累積。
-         */
-        int32_t ScrollAcc;
-
-        /**
-         * スクロール方向シュミットトリガ。
-         * State=0:垂直(縦)、State=非0:水平(横)
-         */
-        SchmittTrigger DirectionSchmitt;
     } UmpDevice;
 
     /**

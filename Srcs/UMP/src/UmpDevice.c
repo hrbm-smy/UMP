@@ -9,7 +9,7 @@
 /*
 MIT License
 
-Copyright (c) 2021 Hirobumi Someya
+Copyright (c) 2026 Hirobumi Someya
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -111,13 +111,8 @@ void UmpDevice_Init(
         memset(ctxt, 0, sizeof(UmpDevice));
 
         Map_Init(
-            UMPDEVICE_DESC_CAP, ctxt->DescMapElms,
-            &ctxt->DescMap);
-
-        RingedFrames_Init(
-            UMPDEVICE_REPORTHIST_CAP,
-            sizeof(HidReportPacket),
-            ctxt->ReportHistBuffer, &ctxt->ReportHistRing);
+            UMPDEVICE_MICE_CAP, ctxt->MouseMapElms,
+            &ctxt->MouseMap);
 
         // ハードウェアUSBコントローラでHIDマウスデバイス初期化
         tud_init(0);
@@ -136,40 +131,45 @@ static void UmpDevice_Descriptor(
     int32_t descLen = HidReportDescriptorRing_Pop(&descPack, inputs->DescRing);
     if (descLen > 0)
     {
-        // Keyを生成し、対応するマウスマップを取得
+        // Keyを生成し、対応するマウスコンテキストを取得
         int32_t key = UMPDEVICE_KEY(descPack.Address, descPack.Instance);
-        HidMouseDescriptorMap *mouseMap = Map_ValueFor(key, &ctxt->DescMap);
+        UmpMouse *mouse = Map_ValueFor(key, &ctxt->MouseMap);
 
         // 無い場合には確保して対応づけ
-        int32_t descMapCount = Map_Count(&ctxt->DescMap);
-        int32_t descMapCap = CAPACITY_OF(ctxt->MouseDescs);
-        if ((mouseMap == nullptr) &&
-            (descMapCount < descMapCap))
+        int32_t count = Map_Count(&ctxt->MouseMap);
+        int32_t cap = CAPACITY_OF(ctxt->Mice);
+        if ((mouse == nullptr) &&
+            (count < cap))
         {
-            mouseMap = &ctxt->MouseDescs[descMapCount];
-            Map_Relate(mouseMap, key, &ctxt->DescMap);
+            mouse = &ctxt->Mice[count];
+            Map_Relate(mouse, key, &ctxt->MouseMap);
         }
 
         // 対応づけられた場合は更新
-        if (mouseMap != NULL)
+        if (mouse != NULL)
         {
-            HidMouseDescriptorMap_Init(mouseMap);
-            HidMouseDescriptorMap_Parse(
-                descPack.ReportDesc, descPack.DescLength, mouseMap);
-            DEBUGUART_PUTS("[UMPDEV] Mapped\r\n");
-        }
+            // マウスコンテキスト全体を初期化
+            UmpMouse_Init(mouse);
 
-        // スクロール方向シュミットトリガを初期化
-        SchmittTrigger_Init(
-            0,
-            config->HSchmittPercentage, 1,
-            config->VSchmittPercentage, 1,
-            &ctxt->DirectionSchmitt);
+            // リポートディスクリプタを解析
+            HidMouseDescriptorMap_Parse(
+                descPack.ReportDesc, descPack.DescLength,
+                &mouse->DescMap);
+            DEBUGUART_PUTS("[UMPDEV] Mapped\r\n");
+
+            // スクロール方向シュミットトリガを初期化
+            SchmittTrigger_Init(
+                0,
+                config->HSchmittPercentage, 1,
+                config->VSchmittPercentage, 1,
+                &mouse->DirectionSchmitt);
+        }
     }
 }
 
 static int ShouldEnterTrackScrollMode(
     uint32_t button,
+    uint32_t lastButton,
     int32_t currentMode,
     const UmpConfig *config)
 {
@@ -177,8 +177,9 @@ static int ShouldEnterTrackScrollMode(
 
     int result = 0;
 
+    uint32_t buttonPressed = button & ~lastButton;
     if ((currentMode == 0) &&
-        (button & config->TrackScrollEnterAssigns))
+        (buttonPressed & config->TrackScrollEnterAssigns))
     {
         result = 1;
     }
@@ -188,6 +189,7 @@ static int ShouldEnterTrackScrollMode(
 
 static int ShouldExitTrackScrollMode(
     uint32_t button,
+    uint32_t lastButton,
     int32_t currentMode,
     const UmpConfig *config)
 {
@@ -195,8 +197,9 @@ static int ShouldExitTrackScrollMode(
 
     int result = 0;
 
+    uint32_t buttonPressed = button & ~lastButton;
     if ((currentMode != 0) &&
-        (button & config->TrackScrollExitAssigns))
+        (buttonPressed & config->TrackScrollExitAssigns))
     {
         result = 1;
     }
@@ -292,7 +295,7 @@ static int8_t consume_scroll_steps(
 static void UmpDevice_ExtendedReport(
     const HidReportPacket *reportPack,
     int32_t reportLen,
-    const HidMouseDescriptorMap *mouseMap,
+    UmpMouse *mouse,
     const UmpDevice_Drive_In *inputs,
     UmpDevice *ctxt)
 {
@@ -302,11 +305,11 @@ static void UmpDevice_ExtendedReport(
     // ともあれ履歴にPushしなおす
     RingedFrames_Push(
         reportPack, reportLen,
-        0LL, &ctxt->ReportHistRing);
+        0LL, &mouse->ReportHistRing);
 
     // ボタンデータ取得
     uint32_t button = HidMouseDescriptorMap_Buttons(
-        reportPack->Report, reportLen, mouseMap);
+        reportPack->Report, reportLen, &mouse->DescMap);
 #if (DEBUGUART_ENABLED == 1)
     {
         char msg[128];
@@ -319,21 +322,21 @@ static void UmpDevice_ExtendedReport(
 #endif
 
     // ボタンが「押された」「放された」エッジを検知
-    uint32_t lastButton = ctxt->ButtonState;
+    uint32_t lastButton = mouse->ButtonState;
     // uint32_t buttonPressed = ctxt->ButtonState | button;
     // uint32_t buttonReleased = ~(ctxt->ButtonState & button);
-    ctxt->ButtonState = button;
+    mouse->ButtonState = button;
 
     // トラックスクロールON/OFF判定、モード遷移
     // これは「押下」エッジで遷移
-    int32_t lastMode = ctxt->Mode;
-    if (ShouldEnterTrackScrollMode(button, ctxt->Mode, config))
+    int32_t lastMode = mouse->Mode;
+    if (ShouldEnterTrackScrollMode(button, lastButton, mouse->Mode, config))
     {
-        ctxt->Mode = UMPDEVICE_MODE_TRACKSCROLL;
+        mouse->Mode = UMPDEVICE_MODE_TRACKSCROLL;
     }
-    else if (ShouldExitTrackScrollMode(button, ctxt->Mode, config))
+    else if (ShouldExitTrackScrollMode(button, lastButton, mouse->Mode, config))
     {
-        ctxt->Mode = 0;
+        mouse->Mode = 0;
     }
 
 #if (DEBUGUART_ENABLED == 1)
@@ -342,19 +345,19 @@ static void UmpDevice_ExtendedReport(
         sniprintf(
             msg, sizeof msg,
             "[UMPDEV] Mode: %d\r\n",
-            (int)ctxt->Mode);
+            (int)mouse->Mode);
         DEBUGUART_PUTS(msg);
     }
 #endif
 
-    if ((ctxt->Mode != lastMode) &&
-        (ctxt->ButtonState != lastButton))
+    if ((mouse->Mode != lastMode) &&
+        (mouse->ButtonState != lastButton))
     {
         // モードが変わったときのボタン押下/解放は転送しない
     }
     else
     {
-        if (ctxt->Mode == UMPDEVICE_MODE_TRACKSCROLL)
+        if (mouse->Mode == UMPDEVICE_MODE_TRACKSCROLL)
         {
             // 縦横どちらにスクロールするか、履歴をたどって傾向を調べる。
             // ジェスチャ認識、的アプローチ。
@@ -366,18 +369,18 @@ static void UmpDevice_ExtendedReport(
             int32_t xAcc = 0;
             int32_t yAcc = 0;
             int32_t histCnt = MinS32(
-                UMPDEVICE_REPORTHIST_CAP,
-                RingedFrames_Count(&ctxt->ReportHistRing));
+                UMPMOUSE_REPORTHIST_CAP,
+                RingedFrames_Count(&mouse->ReportHistRing));
             for (int i = 0; i < histCnt; i++)
             {
                 // 最新のリポートを取得
                 const HidReportPacket *curr = RingedFrames_ReferWithNew(
-                    i, NULL, NULL, &ctxt->ReportHistRing);
+                    i, NULL, NULL, &mouse->ReportHistRing);
 
                 int32_t hx = HidMouseDescriptorMap_X(
-                    curr->Report, curr->ReportLength, mouseMap);
+                    curr->Report, curr->ReportLength, &mouse->DescMap);
                 int32_t hy = HidMouseDescriptorMap_Y(
-                    curr->Report, curr->ReportLength, mouseMap);
+                    curr->Report, curr->ReportLength, &mouse->DescMap);
 
                 xAcc += hx;
                 yAcc += hy;
@@ -394,10 +397,10 @@ static void UmpDevice_ExtendedReport(
             {
                 hPercentage = (numer * 100) / denom;
             }
-            int dir = SchmittTrigger_State(&ctxt->DirectionSchmitt);
+            int dir = SchmittTrigger_State(&mouse->DirectionSchmitt);
             if (hPercentage >= 0)
             {
-                dir = SchmittTrigger_Drive(hPercentage, &ctxt->DirectionSchmitt);
+                dir = SchmittTrigger_Drive(hPercentage, &mouse->DirectionSchmitt);
             }
 
             // 最終的にレポートをまとめていくよ。
@@ -418,7 +421,7 @@ static void UmpDevice_ExtendedReport(
                 // 垂直スクロール(Y方向)
                 // 今回のY方向を取得
                 int32_t y = HidMouseDescriptorMap_Y(
-                    reportPack->Report, reportLen, mouseMap);
+                    reportPack->Report, reportLen, &mouse->DescMap);
 
                 // 垂直は方向を逆にする
                 y = -y;
@@ -426,39 +429,10 @@ static void UmpDevice_ExtendedReport(
                 // 向きが変わったときのリセットはあったほうがよい気がする、
                 // のだが、なんか使用感がしっくりこない。
                 // 将来に期待。
-#if 0
-                // 前回のY方向を取得
-                const HidReportPacket *prev = RingedFrames_ReferWithNew(
-                    1, NULL, NULL, &ctxt->ReportHistRing);
-                int32_t py = y;
-                if (prev != NULL)
-                {
-                    py = HidMouseDescriptorMap_Y(
-                        prev->Report, prev->ReportLength, mouseMap);
-                }
 
-#if (DEBUGUART_ENABLED == 1)
-                                {
-                                    char msg[128];
-                                    sniprintf(
-                                        msg, sizeof msg,
-                                        "[UMPDEV] py=%d y=%d\r\n",
-                                        (int)py, (int)y);
-                                    DEBUGUART_PUTS(msg);
-                                }
-#endif
-
-                // 符号が変わった場合、累積をリセットする
-                if (((ctxt->ScrollAcc < 0) && (y > 0)) ||
-                    ((ctxt->ScrollAcc > 0) && (y < 0)))
-                {
-                    ctxt->ScrollAcc = inputs->Config->TrackScrollThreshold - 1;
-                    DEBUGUART_PUTS("[UMPDEV] Reset ScrollAcc on Y\r\n");
-                }
-#endif
                 // んで、改めて累積
                 int8_t steps = consume_scroll_steps(
-                    &ctxt->ScrollAcc,
+                    &mouse->ScrollAcc,
                     y,
                     config->TrackScrollThreshold);
 
@@ -469,33 +443,15 @@ static void UmpDevice_ExtendedReport(
                 // 水平スクロール(X方向)
                 // 今回のX方向を取得
                 int32_t x = HidMouseDescriptorMap_X(
-                    reportPack->Report, reportLen, mouseMap);
+                    reportPack->Report, reportLen, &mouse->DescMap);
 
                 // 向きが変わったときのリセットはあったほうがよい気がする、
                 // のだが、なんか使用感がしっくりこない。
                 // 将来に期待。
-#if 0
-                // 前回のX方向を取得
-                const HidReportPacket *prev = RingedFrames_ReferWithNew(
-                    1, NULL, NULL, &ctxt->ReportHistRing);
-                int32_t px = x;
-                if (prev != NULL)
-                {
-                    px = HidMouseDescriptorMap_X(
-                        prev->Report, prev->ReportLength, mouseMap);
-                }
 
-                // 符号が変わった場合、累積をリセットする
-                if (((ctxt->ScrollAcc < 0) && (x > 0)) ||
-                    ((ctxt->ScrollAcc > 0) && (x < 0)))
-                {
-                    ctxt->ScrollAcc = inputs->Config->TrackScrollThreshold - 1;
-                    DEBUGUART_PUTS("[UMPDEV] Reset ScrollAcc on X\r\n");
-                }
-#endif
                 // んで、改めて累積
                 int8_t steps = consume_scroll_steps(
-                    &ctxt->ScrollAcc,
+                    &mouse->ScrollAcc,
                     x,
                     config->TrackScrollThreshold);
 
@@ -536,13 +492,13 @@ static void UmpDevice_ExtendedReport(
             // とはいえボタンのリマッピングは行う
             report[0] = RemapButtons(button, config);
             report[1] = HidMouseDescriptorMap_X(
-                reportPack->Report, reportLen, mouseMap);
+                reportPack->Report, reportLen, &mouse->DescMap);
             report[2] = HidMouseDescriptorMap_Y(
-                reportPack->Report, reportLen, mouseMap);
+                reportPack->Report, reportLen, &mouse->DescMap);
             report[3] = HidMouseDescriptorMap_VWheel(
-                reportPack->Report, reportLen, mouseMap);
+                reportPack->Report, reportLen, &mouse->DescMap);
             report[4] = HidMouseDescriptorMap_HWheel(
-                reportPack->Report, reportLen, mouseMap);
+                reportPack->Report, reportLen, &mouse->DescMap);
 
 #if (DEBUGUART_ENABLED == 1)
             char msg[128];
@@ -568,9 +524,9 @@ static void UmpDevice_Report(
     {
         // Keyを生成し、対応するマウスマップを取得
         int32_t key = UMPDEVICE_KEY(reportPack.Address, reportPack.Instance);
-        HidMouseDescriptorMap *mouseMap = Map_ValueFor(key, &ctxt->DescMap);
+        UmpMouse *mouse = Map_ValueFor(key, &ctxt->MouseMap);
 
-        if (mouseMap == NULL)
+        if (mouse == NULL)
         {
             // 対応づけられない場合はデフォルト動作
             // ボタンとマウスカーソルポインタのX、Yだけ
@@ -591,7 +547,7 @@ static void UmpDevice_Report(
             // 対応づけられた場合、いろいろ工夫が始まる
             UmpDevice_ExtendedReport(
                 &reportPack, reportLen,
-                mouseMap,
+                mouse,
                 inputs, ctxt);
         }
     }
