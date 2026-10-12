@@ -21,3 +21,12 @@ Picossci USBホスト（RP2040搭載）(https://www.switch-science.com/products/
 
 Picossci USBホスト は、 BOOTSEL を押したまま RESET を押下->放すと、(要するに立ち上げ時 BOOTSEL が押されていると) USBドライブとしてマウントされます。<br>
 マウントされたUSBドライブに、ビルドの結果生成された .pio\build\ump\firmware.uf2 をコピーすることで書き込まれます。
+
+## 開発状況について
+
+本プロジェクトは現在開発中です。
+
+USB VID/PIDには暫定的な値を使用しており、正式な割り当ては取得していません。<br>
+そのため、現時点ではソースコードのみを公開し、ビルド済みファームウェアの配布は行っていません。
+
+正式なVID/PIDについては、今後対応する予定です。
