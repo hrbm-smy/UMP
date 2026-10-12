@@ -14,9 +14,9 @@ tusb_desc_device_t const desc_device = {
     .idVendor = 0xCafe,
     .idProduct = 0x4004,
     .bcdDevice = 0x0100,
-    .iManufacturer = 0x01,
-    .iProduct = 0x02,
-    .iSerialNumber = 0x03,
+    .iManufacturer = 0x00,
+    .iProduct = 0x01,
+    .iSerialNumber = 0x00,
     .bNumConfigurations = 0x01,
 };
 
@@ -25,7 +25,7 @@ uint8_t const *tud_descriptor_device_cb(void)
     return (uint8_t const *)&desc_device;
 }
 
-// ---- HID Report Descriptor: Boot Protocol Mouse (buttons + X + Y) ----
+// ---- HID Report Descriptor: Mouse (5 buttons + X + Y + Wheel + AC Pan) ----
 
 uint8_t const desc_hid_report[] = {
     0x05, 0x01,  // Usage Page (Generic Desktop)
@@ -108,9 +108,7 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index)
 
 static char const *string_desc_arr[] = {
     (const char[]){0x09, 0x04}, // 0: Language = English
-    "TinyUSB",                  // 1: Manufacturer
-    "PIO USB Mouse",            // 2: Product
-    "000001",                   // 3: Serial
+    "USB Mouse",                // 1: Product (manufacturer and serial omitted)
 };
 
 static uint16_t _desc_str[32];
